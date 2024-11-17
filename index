@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shopify CSV Generator</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+    
+    <!-- Custom CSS -->
+    <style>
+        .variant-card {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .option-card {
+            background-color: white;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .form-label {
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+        
+        .list-group-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 1rem;
+        }
+        
+        .btn-sm {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .container {
+            max-width: 1200px;
+            padding: 20px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+        
+        h3 {
+            color: #34495e;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- React Dependencies -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Application Script -->
+    <script type="text/babel">
+        // Helper function for CSV field escaping
+        const escapeCsvField = (field) => {
+            if (field == null) return '';
+            const fieldString = field.toString();
+            if (fieldString.includes('"')) return `"${fieldString.replace(/"/g, '""')}"`;
+            if (fieldString.includes(',') || fieldString.includes('\n')) return `"${fieldString}"`;
+            return fieldString;
+        };
+
+        const ShopifyCsvGenerator = () => {
+            // State for file URLs and global Filaments & Accessories
+            const [fileUrls, setFileUrls] = React.useState({
+                models: [{ url: '', name: '' }],
+                instructions: [{ url: '' }], // Removed 'name' field
+                images: [{ url: '' }], // Removed 'name' field
+                filaments: [{ url: '', name: '' }],
+                accessories: [{ url: '', name: '' }]
+            });
+
+            // State for product info
+            const [productInfo, setProductInfo] = React.useState({
+                designerBrandName: '',
+                title: '',
+                bodyHtml: '',
+                designerCommission: ''
+            });
+
+            // State for default single option
+            const [defaultOption, setDefaultOption] = React.useState({
+                price: '',
+                shippingWeight: '',
+                boxDimensions: '10" x 10" x 4"'
+            });
+
+            // State for a single variant (multi-option mode)
+            const [variant, setVariant] = React.useState({
+                variantName: '',
+                options: [] // Array of options: { optionName, selectedModelFiles, selectedFilaments, selectedAccessories, price, shippingWeight, boxDimensions }
+            });
+
+            // Flag to check if variant options have been added
+            const [variantOptionsAdded, setVariantOptionsAdded] = React.useState(false);
+
+            // Add/Remove file URL handlers
+            const handleFileUrlChange = (type, index, field, value) => {
+                const newFileUrls = { ...fileUrls };
+                newFileUrls[type][index][field] = value;
+                setFileUrls(newFileUrls);
+            };
+
+            const addFileUrl = (type) => {
+                const newEntry = type === 'instructions' || type === 'images'
+                    ? { url: '' } // Only URL field for instructions and images
+                    : { url: '', name: '' }; // Name and URL for others
+                setFileUrls(prev => ({
+                    ...prev,
+                    [type]: [...prev[type], newEntry]
+                }));
+            };
+
+            const removeFileUrl = (type, index) => {
+                setFileUrls(prev => ({
+                    ...prev,
+                    [type]: prev[type].filter((_, i) => i !== index)
+                }));
+            };
+
+            // Add Option (handles variant creation and adding options)
+            const addOption = () => {
+                const maxOptions = 8;
+                const currentOptions = variant.options.length;
+
+                if (variantOptionsAdded) {
+                    // In multi-option mode, add one option at a time
+                    if (currentOptions < maxOptions) {
+                        setVariant(prev => ({
+                            ...prev,
+                            options: [
+                                ...prev.options,
+                                {
+                                    optionName: '',
+                                    selectedModelFiles: [],
+                                    selectedFilaments: [],
+                                    selectedAccessories: [],
+                                    price: '',
+                                    shippingWeight: '',
+                                    boxDimensions: '10" x 10" x 4"'
+                                }
+                            ]
+                        }));
+                    }
+                } else {
+                    // First time adding options: initialize with two options
+                    setVariant({
+                        variantName: '',
+                        options: [
+                            {
+                                optionName: '',
+                                selectedModelFiles: [],
+                                selectedFilaments: [],
+                                selectedAccessories: [],
+                                price: '',
+                                shippingWeight: '',
+                                boxDimensions: '10" x 10" x 4"'
+                            },
+                            {
+                                optionName: '',
+                                selectedModelFiles: [],
+                                selectedFilaments: [],
+                                selectedAccessories: [],
+                                price: '',
+                                shippingWeight: '',
+                                boxDimensions: '10" x 10" x 4"'
+                            }
+                        ]
+                    });
+                    setVariantOptionsAdded(true);
+                }
+            };
+
+            // Remove Option
+            const removeOption = (optionIndex) => {
+                setVariant(prev => {
+                    const newOptions = prev.options.filter((_, i) => i !== optionIndex);
+                    if (newOptions.length === 0) {
+                        // Revert to default mode
+                        setVariantOptionsAdded(false);
+                        return {
+                            variantName: '',
+                            options: []
+                        };
+                    }
+                    return {
+                        ...prev,
+                        options: newOptions
+                    };
+                });
+            };
+
+            // Toggle model file selection for an option
+            const toggleModelFileSelection = (optionIndex, modelIndex) => {
+                const selected = variant.options[optionIndex].selectedModelFiles;
+                let updatedSelected;
+                if (selected.includes(modelIndex)) {
+                    updatedSelected = selected.filter(i => i !== modelIndex);
+                } else {
+                    updatedSelected = [...selected, modelIndex];
+                }
+                const updatedOptions = variant.options.map((option, idx) => {
+                    if (idx === optionIndex) {
+                        return { ...option, selectedModelFiles: updatedSelected };
+                    }
+                    return option;
+                });
+                setVariant(prev => ({ ...prev, options: updatedOptions }));
+            };
+
+            // Toggle filament selection for an option
+            const toggleFilamentSelection = (optionIndex, filamentIndex) => {
+                const selected = variant.options[optionIndex].selectedFilaments;
+                let updatedSelected;
+                if (selected.includes(filamentIndex)) {
+                    updatedSelected = selected.filter(i => i !== filamentIndex);
+                } else {
+                    updatedSelected = [...selected, filamentIndex];
+                }
+                const updatedOptions = variant.options.map((option, idx) => {
+                    if (idx === optionIndex) {
+                        return { ...option, selectedFilaments: updatedSelected };
+                    }
+                    return option;
+                });
+                setVariant(prev => ({ ...prev, options: updatedOptions }));
+            };
+
+            // Toggle accessory selection for an option
+            const toggleAccessorySelection = (optionIndex, accessoryIndex) => {
+                const selected = variant.options[optionIndex].selectedAccessories;
+                let updatedSelected;
+                if (selected.includes(accessoryIndex)) {
+                    updatedSelected = selected.filter(i => i !== accessoryIndex);
+                } else {
+                    updatedSelected = [...selected, accessoryIndex];
+                }
+                const updatedOptions = variant.options.map((option, idx) => {
+                    if (idx === optionIndex) {
+                        return { ...option, selectedAccessories: updatedSelected };
+                    }
+                    return option;
+                });
+                setVariant(prev => ({ ...prev, options: updatedOptions }));
+            };
+
+            // Function to create Handle from Title or Brand
+            const createHandle = (text) => {
+                return text.trim().toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-');
+            };
+
+            // Function to convert lbs to grams
+            const convertLbsToGrams = (lbs) => {
+                const grams = parseFloat(lbs) * 453.592;
+                return Math.round(grams);
+            };
+
+            // Generate CSVs
+            const generateCsv = () => {
+                try {
+                    // Generate Listing CSV
+                    const csvRowsListing = [];
+                    
+                    // Define headers for Listing CSV
+                    const headersListing = [
+                        'Handle',
+                        'Vendor',
+                        'Published',
+                        'Option1 Name',
+                        'Option1 Value',
+                        'Variant Grams',
+                        'Variant Price',
+                        'Variant Requires Shipping',
+                        'Variant Taxable',
+                        'Variant Weight Unit',
+                        'Status',
+                        'Title',
+                        'Body (HTML)'
+                    ];
+                    
+                    csvRowsListing.push(headersListing.map(escapeCsvField).join(','));
+
+                    // Prepare Handle
+                    const handle = createHandle(productInfo.title);
+
+                    // Prepare Brand Handle
+                    const brandHandle = createHandle(productInfo.designerBrandName) || 'printswarm';
+
+                    // Vendor from Designer/Brand Name
+                    const vendor = productInfo.designerBrandName.trim() !== '' ? productInfo.designerBrandName : 'PrintSwarm';
+
+                    // Published is fixed
+                    const published = 'FALSE';
+
+                    if (variantOptionsAdded) {
+                        // Multi-Option Mode
+                        variant.options.forEach(option => {
+                            // Option1 Name is variant.variantName
+                            const option1Name = variant.variantName || 'Variant';
+
+                            // Option1 Value is option.optionName or "Default Title" if not set
+                            const option1Value = option.optionName || 'Default Title';
+
+                            // Variant Grams: convert from lbs to grams
+                            const variantGrams = convertLbsToGrams(option.shippingWeight);
+
+                            // Variant Price: ensure it's a valid number with two decimal places
+                            const variantPrice = parseFloat(option.price).toFixed(2);
+
+                            // Variant Requires Shipping
+                            const variantRequiresShipping = 'TRUE';
+
+                            // Variant Taxable
+                            const variantTaxable = 'TRUE';
+
+                            // Variant Weight Unit
+                            const variantWeightUnit = 'lb';
+
+                            // Status
+                            const status = 'DRAFT';
+
+                            // Title and Body
+                            const title = productInfo.title;
+                            const bodyHtml = productInfo.bodyHtml;
+
+                            const row = [
+                                handle,
+                                vendor,
+                                published,
+                                option1Name,
+                                option1Value,
+                                variantGrams,
+                                variantPrice,
+                                variantRequiresShipping,
+                                variantTaxable,
+                                variantWeightUnit,
+                                status,
+                                title,
+                                bodyHtml
+                            ];
+                            csvRowsListing.push(row.map(escapeCsvField).join(','));
+                        });
+                    } else {
+                        // Default Mode (No Variants)
+                        // Option1 Name is Title
+                        const option1Name = productInfo.title || 'Default Title';
+
+                        // Option1 Value is "Default Title"
+                        const option1Value = 'Default Title';
+
+                        // Variant Grams: convert from lbs to grams
+                        const variantGrams = convertLbsToGrams(defaultOption.shippingWeight);
+
+                        // Variant Price: ensure it's a valid number with two decimal places
+                        const variantPrice = parseFloat(defaultOption.price).toFixed(2);
+
+                        // Variant Requires Shipping
+                        const variantRequiresShipping = 'TRUE';
+
+                        // Variant Taxable
+                        const variantTaxable = 'TRUE';
+
+                        // Variant Weight Unit
+                        const variantWeightUnit = 'lb';
+
+                        // Status
+                        const status = 'DRAFT';
+
+                        // Title and Body
+                        const title = productInfo.title;
+                        const bodyHtml = productInfo.bodyHtml;
+
+                        const row = [
+                            handle,
+                            vendor,
+                            published,
+                            option1Name,
+                            option1Value,
+                            variantGrams,
+                            variantPrice,
+                            variantRequiresShipping,
+                            variantTaxable,
+                            variantWeightUnit,
+                            status,
+                            title,
+                            bodyHtml
+                        ];
+                        csvRowsListing.push(row.map(escapeCsvField).join(','));
+                    }
+
+                    // Generate Listing CSV
+                    const csvContentListing = csvRowsListing.join('\n');
+                    const blobListing = new Blob([csvContentListing], { type: 'text/csv;charset=utf-8;' });
+                    const urlListing = URL.createObjectURL(blobListing);
+                    const linkListing = document.createElement('a');
+
+                    // Create filename in the format Listing-Brand-Title.csv
+                    const filenameListing = `Listing-${brandHandle}-${handle || 'shopify-product'}.csv`;
+                    linkListing.download = filenameListing;
+                    linkListing.href = urlListing;
+
+                    // Append to the DOM and trigger download
+                    document.body.appendChild(linkListing);
+                    linkListing.click();
+                    document.body.removeChild(linkListing);
+                    URL.revokeObjectURL(urlListing);
+                    
+                    console.log(`CSV file "${filenameListing}" generated and download started.`);
+
+                    // Generate Master CSV
+                    const csvRowsMaster = [];
+                    
+                    // Define headers for Master CSV
+                    const headersMaster = [
+                        'Handle',
+                        'Vendor',
+                        'Published',
+                        'Option1 Name',
+                        'Option1 Value',
+                        'Variant Grams',
+                        'Variant Price',
+                        'Variant Requires Shipping',
+                        'Variant Taxable',
+                        'Variant Weight Unit',
+                        'Status',
+                        'Title',
+                        'Body (HTML)',
+                        'Designer Commission (%)',
+                        '3D Model File Names',
+                        '3D Model File URLs',
+                        'Maker Instructions URLs',
+                        'Filament Names',
+                        'Filament URLs',
+                        'Accessory Names',
+                        'Accessory URLs'
+                    ];
+                    
+                    csvRowsMaster.push(headersMaster.map(escapeCsvField).join(','));
+
+                    if (variantOptionsAdded) {
+                        // Multi-Option Mode
+                        variant.options.forEach(option => {
+                            // Concatenate multiple entries with semicolons
+                            const modelNames = option.selectedModelFiles.map(index => fileUrls.models[index].name || `Model ${index + 1}`).join('; ');
+                            const modelUrls = option.selectedModelFiles.map(index => fileUrls.models[index].url).join('; ');
+                            const instructionUrls = fileUrls.instructions.map(file => file.url).filter(url => url).join('; ');
+                            const filamentNames = option.selectedFilaments.map(index => fileUrls.filaments[index].name || `Filament ${index + 1}`).join('; ');
+                            const filamentUrls = option.selectedFilaments.map(index => fileUrls.filaments[index].url).join('; ');
+                            const accessoryNames = option.selectedAccessories.map(index => fileUrls.accessories[index].name || `Accessory ${index + 1}`).join('; ');
+                            const accessoryUrls = option.selectedAccessories.map(index => fileUrls.accessories[index].url).join('; ');
+
+                            const row = [
+                                handle,
+                                vendor,
+                                published,
+                                variant.variantName || 'Variant',
+                                option.optionName || 'Default Title',
+                                convertLbsToGrams(option.shippingWeight),
+                                parseFloat(option.price).toFixed(2),
+                                'TRUE',
+                                'TRUE',
+                                'lb',
+                                'DRAFT',
+                                productInfo.title,
+                                productInfo.bodyHtml,
+                                productInfo.designerCommission,
+                                modelNames,
+                                modelUrls,
+                                instructionUrls,
+                                filamentNames,
+                                filamentUrls,
+                                accessoryNames,
+                                accessoryUrls
+                            ];
+                            csvRowsMaster.push(row.map(escapeCsvField).join(','));
+                        });
+                    } else {
+                        // Default Mode (No Variants)
+                        const modelNames = fileUrls.models.map(file => file.name || `Model ${fileUrls.models.indexOf(file) + 1}`).join('; ');
+                        const modelUrls = fileUrls.models.map(file => file.url).join('; ');
+                        const instructionUrls = fileUrls.instructions.map(file => file.url).filter(url => url).join('; ');
+                        const filamentNames = fileUrls.filaments.map(file => file.name || `Filament ${fileUrls.filaments.indexOf(file) + 1}`).join('; ');
+                        const filamentUrls = fileUrls.filaments.map(file => file.url).join('; ');
+                        const accessoryNames = fileUrls.accessories.map(file => file.name || `Accessory ${fileUrls.accessories.indexOf(file) + 1}`).join('; ');
+                        const accessoryUrls = fileUrls.accessories.map(file => file.url).join('; ');
+
+                        const row = [
+                            handle,
+                            vendor,
+                            published,
+                            productInfo.title || 'Default Title',
+                            'Default Title',
+                            convertLbsToGrams(defaultOption.shippingWeight),
+                            parseFloat(defaultOption.price).toFixed(2),
+                            'TRUE',
+                            'TRUE',
+                            'lb',
+                            'DRAFT',
+                            productInfo.title,
+                            productInfo.bodyHtml,
+                            productInfo.designerCommission,
+                            modelNames,
+                            modelUrls,
+                            instructionUrls,
+                            filamentNames,
+                            filamentUrls,
+                            accessoryNames,
+                            accessoryUrls
+                        ];
+                        csvRowsMaster.push(row.map(escapeCsvField).join(','));
+                    }
+
+                    // Generate Master CSV
+                    const csvContentMaster = csvRowsMaster.join('\n');
+                    const blobMaster = new Blob([csvContentMaster], { type: 'text/csv;charset=utf-8;' });
+                    const urlMaster = URL.createObjectURL(blobMaster);
+                    const linkMaster = document.createElement('a');
+
+                    // Create filename in the format Master-Brand-Title.csv
+                    const filenameMaster = `Master-${brandHandle}-${handle || 'shopify-product'}.csv`;
+                    linkMaster.download = filenameMaster;
+                    linkMaster.href = urlMaster;
+
+                    // Append to the DOM and trigger download
+                    document.body.appendChild(linkMaster);
+                    linkMaster.click();
+                    document.body.removeChild(linkMaster);
+                    URL.revokeObjectURL(urlMaster);
+                    
+                    console.log(`CSV file "${filenameMaster}" generated and download started.`);
+
+                    alert(`CSV files "${filenameListing}" and "${filenameMaster}" have been generated and download started.`);
+                } catch (error) {
+                    console.error('Error generating CSV:', error);
+                    alert('An error occurred while generating the CSVs. Please check the console for details.');
+                }
+            };
+
+            // Validation function to check required fields
+            const isGenerateDisabled = () => {
+                // Check required basic info
+                if (
+                    !productInfo.designerBrandName.trim() ||
+                    !productInfo.title.trim() ||
+                    !productInfo.bodyHtml.trim() ||
+                    !productInfo.designerCommission.trim()
+                ) {
+                    return true;
+                }
+
+                // Check required file URLs
+                const hasModels = fileUrls.models.some(file => file.url.trim());
+                const hasInstructions = fileUrls.instructions.some(file => file.url.trim());
+                const hasImages = fileUrls.images.some(file => file.url.trim());
+                const hasFilaments = fileUrls.filaments.some(file => file.url.trim());
+
+                if (!hasModels || !hasInstructions || !hasImages || !hasFilaments) {
+                    return true;
+                }
+
+                // Check default option if in default mode
+                if (!variantOptionsAdded) {
+                    if (
+                        !defaultOption.price.trim() ||
+                        !defaultOption.shippingWeight.trim() ||
+                        !defaultOption.boxDimensions.trim()
+                    ) {
+                        return true;
+                    }
+                } else {
+                    // In variant mode, check variant name and each option
+                    if (!variant.variantName.trim()) {
+                        return true;
+                    }
+                    if (variant.options.length === 0) {
+                        return true;
+                    }
+                    for (let option of variant.options) {
+                        if (
+                            !option.optionName.trim() ||
+                            !option.price.trim() ||
+                            !option.shippingWeight.trim() ||
+                            !option.boxDimensions.trim()
+                        ) {
+                            return true;
+                        }
+                        // Each option must have at least one model and one filament
+                        if (option.selectedModelFiles.length === 0 || option.selectedFilaments.length === 0) {
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            };
+
+            return (
+                <div className="container">
+                    <h1 className="mb-4">Shopify Product CSV Generator</h1>
+                    
+                    {/* Basic Information */}
+                    <div className="mb-4">
+                        <h3>Basic Information</h3>
+                        {/* Designer/Brand Name */}
+                        <div className="row mb-3">
+                            <div className="col-md-6">
+                                <label htmlFor="designerBrandName" className="form-label">Designer/Brand Name</label>
+                                <input 
+                                    type="text"
+                                    id="designerBrandName"
+                                    className="form-control"
+                                    value={productInfo.designerBrandName}
+                                    onChange={(e) => setProductInfo({...productInfo, designerBrandName: e.target.value})}
+                                    placeholder="Enter Designer/Brand Name"
+                                />
+                            </div>
+                        </div>
+                        {/* Title */}
+                        <div className="row mb-3">
+                            <div className="col-md-6">
+                                <label htmlFor="title" className="form-label">Title</label>
+                                <input 
+                                    type="text"
+                                    id="title"
+                                    className="form-control"
+                                    value={productInfo.title}
+                                    onChange={(e) => setProductInfo({...productInfo, title: e.target.value})}
+                                    placeholder="Product Title"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="mb-3">
+                            <label htmlFor="bodyHtml" className="form-label">Description (HTML)</label>
+                            <textarea 
+                                id="bodyHtml"
+                                className="form-control"
+                                value={productInfo.bodyHtml}
+                                onChange={(e) => setProductInfo({...productInfo, bodyHtml: e.target.value})}
+                                placeholder="Product description..."
+                                rows="4"
+                            />
+                        </div>
+
+                        <div className="mb-3">
+                            <label htmlFor="designerCommission" className="form-label">Designer Commission (%)</label>
+                            <input 
+                                type="number"
+                                id="designerCommission"
+                                className="form-control"
+                                value={productInfo.designerCommission}
+                                onChange={(e) => setProductInfo({...productInfo, designerCommission: e.target.value})}
+                                placeholder="10"
+                                min="0"
+                                step="0.01"
+                            />
+                        </div>
+
+                        {/* File URL Sections */}
+                        <div className="mb-4">
+                            <label className="form-label">3D Model Files</label>
+                            {fileUrls.models.map((file, index) => (
+                                <div key={index} className="row mb-2 align-items-center">
+                                    <div className="col-md-6">
+                                        <input
+                                            type="text"
+                                            className="form-control"
+                                            placeholder="Name"
+                                            value={file.name}
+                                            onChange={(e) => handleFileUrlChange('models', index, 'name', e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="col-md-4">
+                                        <input
+                                            type="text"
+                                            className="form-control"
+                                            placeholder="URL"
+                                            value={file.url}
+                                            onChange={(e) => handleFileUrlChange('models', index, 'url', e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="col-md-2">
+                                        {index === 0 ? (
+                                            <button
+                                                className="btn btn-secondary btn-sm w-100"
+                                                onClick={() => addFileUrl('models')}
+                                            >
+                                                + Add
+                                            </button>
+                                        ) : (
+                                            <button
+                                                className="btn btn-danger btn-sm w-100"
+                                                onClick={() => removeFileUrl('models', index)}
+                                            >
+                                                Remove
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Maker Instructions */}
+                        <div className="mb-4">
+                            <label className="form-label">Maker Instructions</label>
+                            {fileUrls.instructions.map((file, index) => (
+                                <div key={index} className="row mb-2 align-items-center">
+                                    {/* Removed Name field */}
+                                    <div className="col-md-6">
+                                        <input
+                                            type="text"
+                                            className="form-control"
+                                            placeholder="URL"
+                                            value={file.url}
+                                            onChange={(e) => handleFileUrlChange('instructions', index, 'url', e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="col-md-4">
+                                        {/* Optional: Add more fields if needed */}
+                                    </div>
+                                    <div className="col-md-2">
+                                        {index === 0 ? (
+                                            <button
+                                                className="btn btn-secondary btn-sm w-100"
+                                                onClick={() => addFileUrl('instructions')}
+                                            >
+                                                + Add
+                                            </button>
+                                        ) : (
+                                            <button
+                                                className="btn btn-danger btn-sm w-100"
+                                                onClick={() => removeFileUrl('instructions', index)}
+                                            >
+                                                Remove
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Product Images Folder */}
+                        <div className="mb-4">
+                            <label className="form-label">Product Images Folder URL</label>
+                            {fileUrls.images.map((file, index) => (
+                                <div key={index} className="row mb-2 align-items-center">
+                                    {/* Removed Name field */}
+                                    <div className="col-md-6">
+                                        <input
+                                            type="text"
+                                            className="form-control"
+                                            placeholder="URL"
+                                            value={file.url}
+                                            onChange={(e) => handleFileUrlChange('images', index, 'url', e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="col-md-4">
+                                        {/* Optional: Add more fields if needed */}
+                                    </div>
+                                    <div className="col-md-2">
+                                        {index === 0 ? (
+                                            <button
+                                                className="btn btn-secondary btn-sm w-100"
+                                                onClick={() => addFileUrl('images')}
+                                            >
+                                                + Add
+                                            </button>
+                                        ) : (
+                                            <button
+                                                className="btn btn-danger btn-sm w-100"
+                                                onClick={() => removeFileUrl('images', index)}
+                                            >
+                                                Remove
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Filaments */}
+                        <div className="mb-4">
+                            <label className="form-label">Filaments</label>
+                            {fileUrls.filaments.map((file, index) => (
+                                <div key={index} className="row mb-2 align-items-center">
+                                    <div className="col-md-6">
+                                        <input
+                                            type="text"
+                                            className="form-control"
+                                            placeholder="Name"
+                                            value={file.name}
+                                            onChange={(e) => handleFileUrlChange('filaments', index, 'name', e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="col-md-4">
+                                        <input
+                                            type="text"
+                                            className="form-control"
+                                            placeholder="URL"
+                                            value={file.url}
+                                            onChange={(e) => handleFileUrlChange('filaments', index, 'url', e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="col-md-2">
+                                        {index === 0 ? (
+                                            <button
+                                                className="btn btn-secondary btn-sm w-100"
+                                                onClick={() => addFileUrl('filaments')}
+                                            >
+                                                + Add
+                                            </button>
+                                        ) : (
+                                            <button
+                                                className="btn btn-danger btn-sm w-100"
+                                                onClick={() => removeFileUrl('filaments', index)}
+                                            >
+                                                Remove
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Accessories */}
+                        <div className="mb-4">
+                            <label className="form-label">Accessories</label>
+                            {fileUrls.accessories.map((file, index) => (
+                                <div key={index} className="row mb-2 align-items-center">
+                                    <div className="col-md-6">
+                                        <input
+                                            type="text"
+                                            className="form-control"
+                                            placeholder="Name"
+                                            value={file.name}
+                                            onChange={(e) => handleFileUrlChange('accessories', index, 'name', e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="col-md-4">
+                                        <input
+                                            type="text"
+                                            className="form-control"
+                                            placeholder="URL"
+                                            value={file.url}
+                                            onChange={(e) => handleFileUrlChange('accessories', index, 'url', e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="col-md-2">
+                                        {index === 0 ? (
+                                            <button
+                                                className="btn btn-secondary btn-sm w-100"
+                                                onClick={() => addFileUrl('accessories')}
+                                            >
+                                                + Add
+                                            </button>
+                                        ) : (
+                                            <button
+                                                className="btn btn-danger btn-sm w-100"
+                                                onClick={() => removeFileUrl('accessories', index)}
+                                            >
+                                                Remove
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Variant Options */}
+                    <div className="mb-4">
+                        <h3>Variant Options</h3>
+                        {!variantOptionsAdded && (
+                            <div>
+                                {/* Standalone Price, Shipping Weight, Box Dimensions */}
+                                <div className="row mb-3">
+                                    <div className="col-md-4">
+                                        <label htmlFor="defaultPrice" className="form-label">Price</label>
+                                        <input
+                                            type="number"
+                                            id="defaultPrice"
+                                            className="form-control"
+                                            value={defaultOption.price}
+                                            onChange={(e) => setDefaultOption({ ...defaultOption, price: e.target.value })}
+                                            placeholder="Enter price"
+                                            min="0"
+                                            step="0.01"
+                                        />
+                                    </div>
+                                    <div className="col-md-4">
+                                        <label htmlFor="defaultShippingWeight" className="form-label">Shipping Weight (lbs)</label>
+                                        <input
+                                            type="number"
+                                            id="defaultShippingWeight"
+                                            className="form-control"
+                                            value={defaultOption.shippingWeight}
+                                            onChange={(e) => setDefaultOption({ ...defaultOption, shippingWeight: e.target.value })}
+                                            placeholder="Enter shipping weight"
+                                            min="0"
+                                            step="0.01"
+                                        />
+                                    </div>
+                                    <div className="col-md-4">
+                                        <label htmlFor="defaultBoxDimensions" className="form-label">Box Dimensions</label>
+                                        <select
+                                            id="defaultBoxDimensions"
+                                            className="form-select"
+                                            value={defaultOption.boxDimensions}
+                                            onChange={(e) => setDefaultOption({ ...defaultOption, boxDimensions: e.target.value })}
+                                        >
+                                            <option value='10" x 10" x 4"'>10" x 10" x 4"</option>
+                                            <option value='14" x 14" x 4"'>14" x 14" x 4"</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <button className="btn btn-primary btn-sm mb-3" onClick={addOption}>
+                                    + Add Option
+                                </button>
+                            </div>
+                        )}
+
+                        {variantOptionsAdded && (
+                            <div className="variant-card mb-4 p-3 border rounded">
+                                {/* Variant Name */}
+                                <div className="row mb-3">
+                                    <div className="col-md-6">
+                                        <label htmlFor="variantName" className="form-label">Variant Name</label>
+                                        <input
+                                            type="text"
+                                            id="variantName"
+                                            className="form-control"
+                                            value={variant.variantName}
+                                            onChange={(e) => setVariant({ ...variant, variantName: e.target.value })}
+                                            placeholder="e.g., Size, Color"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Options */}
+                                {variant.options.map((option, optionIndex) => (
+                                    <div key={optionIndex} className="option-card mb-3 p-3 border rounded">
+                                        <div className="d-flex justify-content-between align-items-center mb-3">
+                                            {variant.options.length > 1 && (
+                                                <div className="d-flex align-items-center">
+                                                    <h5 className="mb-0 me-3">Option Name</h5>
+                                                    <input
+                                                        type="text"
+                                                        className="form-control form-control-sm w-auto"
+                                                        value={option.optionName}
+                                                        onChange={(e) => {
+                                                            const newOptions = [...variant.options];
+                                                            newOptions[optionIndex].optionName = e.target.value;
+                                                            setVariant({ ...variant, options: newOptions });
+                                                        }}
+                                                        placeholder="Enter Option Name"
+                                                    />
+                                                </div>
+                                            )}
+                                            {variant.options.length > 1 && (
+                                                <button 
+                                                    className="btn btn-danger btn-sm"
+                                                    onClick={() => removeOption(optionIndex)}
+                                                >
+                                                    Remove Option
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        {/* 3D Model Files Checklist */}
+                                        <div className="mb-3">
+                                            <label className="form-label">Select 3D Model Files</label>
+                                            {fileUrls.models.map((file, modelIndex) => (
+                                                <div key={modelIndex} className="form-check">
+                                                    <input
+                                                        className="form-check-input"
+                                                        type="checkbox"
+                                                        value={modelIndex}
+                                                        id={`option-${optionIndex}-model-${modelIndex}`}
+                                                        checked={option.selectedModelFiles.includes(modelIndex)}
+                                                        onChange={() => toggleModelFileSelection(optionIndex, modelIndex)}
+                                                    />
+                                                    <label className="form-check-label" htmlFor={`option-${optionIndex}-model-${modelIndex}`}>
+                                                        {file.name || `Model ${modelIndex + 1}`}
+                                                    </label>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {/* Filaments Checklist */}
+                                        <div className="mb-3">
+                                            <label className="form-label">Select Filaments</label>
+                                            {fileUrls.filaments.map((filament, filamentIndex) => (
+                                                <div key={filamentIndex} className="form-check">
+                                                    <input
+                                                        className="form-check-input"
+                                                        type="checkbox"
+                                                        value={filamentIndex}
+                                                        id={`option-${optionIndex}-filament-${filamentIndex}`}
+                                                        checked={option.selectedFilaments.includes(filamentIndex)}
+                                                        onChange={() => toggleFilamentSelection(optionIndex, filamentIndex)}
+                                                    />
+                                                    <label className="form-check-label" htmlFor={`option-${optionIndex}-filament-${filamentIndex}`}>
+                                                        {filament.name || `Filament ${filamentIndex + 1}`}
+                                                    </label>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {/* Accessories Checklist */}
+                                        <div className="mb-3">
+                                            <label className="form-label">Select Accessories</label>
+                                            {fileUrls.accessories.map((accessory, accessoryIndex) => (
+                                                <div key={accessoryIndex} className="form-check">
+                                                    <input
+                                                        className="form-check-input"
+                                                        type="checkbox"
+                                                        value={accessoryIndex}
+                                                        id={`option-${optionIndex}-accessory-${accessoryIndex}`}
+                                                        checked={option.selectedAccessories.includes(accessoryIndex)}
+                                                        onChange={() => toggleAccessorySelection(optionIndex, accessoryIndex)}
+                                                    />
+                                                    <label className="form-check-label" htmlFor={`option-${optionIndex}-accessory-${accessoryIndex}`}>
+                                                        {accessory.name || `Accessory ${accessoryIndex + 1}`}
+                                                    </label>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {/* Pricing and Shipping */}
+                                        <div className="row mb-3">
+                                            <div className="col-md-4">
+                                                <label className="form-label">Price</label>
+                                                <input
+                                                    type="number"
+                                                    className="form-control"
+                                                    value={option.price}
+                                                    onChange={(e) => {
+                                                        const newOptions = [...variant.options];
+                                                        newOptions[optionIndex].price = e.target.value;
+                                                        setVariant({ ...variant, options: newOptions });
+                                                    }}
+                                                    placeholder="Enter price"
+                                                    min="0"
+                                                    step="0.01"
+                                                />
+                                            </div>
+                                            <div className="col-md-4">
+                                                <label className="form-label">Shipping Weight (lbs)</label>
+                                                <input
+                                                    type="number"
+                                                    className="form-control"
+                                                    value={option.shippingWeight}
+                                                    onChange={(e) => {
+                                                        const newOptions = [...variant.options];
+                                                        newOptions[optionIndex].shippingWeight = e.target.value;
+                                                        setVariant({ ...variant, options: newOptions });
+                                                    }}
+                                                    placeholder="Enter shipping weight"
+                                                    min="0"
+                                                    step="0.01"
+                                                />
+                                            </div>
+                                            <div className="col-md-4">
+                                                <label className="form-label">Box Dimensions</label>
+                                                <select
+                                                    className="form-select"
+                                                    value={option.boxDimensions}
+                                                    onChange={(e) => {
+                                                        const newOptions = [...variant.options];
+                                                        newOptions[optionIndex].boxDimensions = e.target.value;
+                                                        setVariant({ ...variant, options: newOptions });
+                                                    }}
+                                                >
+                                                    <option value='10" x 10" x 4"'>10" x 10" x 4"</option>
+                                                    <option value='14" x 14" x 4"'>14" x 14" x 4"</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+
+                                {/* Add Option Button */}
+                                {variant.options.length < 8 && (
+                                    <button
+                                        className="btn btn-secondary"
+                                        onClick={addOption}
+                                    >
+                                        + Add Option
+                                    </button>
+                                )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Generate CSV Button */}
+                        <button 
+                            className="btn btn-success w-100 btn-lg mb-4"
+                            onClick={generateCsv}
+                            disabled={isGenerateDisabled()}
+                        >
+                            📥 Generate CSV
+                        </button>
+                    </div>
+                );
+            };
+
+            // Initialize the app
+            ReactDOM.createRoot(document.getElementById('root')).render(<ShopifyCsvGenerator />);
+
+            // Global Error Handling
+            window.addEventListener('error', (event) => {
+                console.error('Script loading error:', event.error);
+                if (document.getElementById('root')) {
+                    document.getElementById('root').innerHTML = `
+                        <div class="container mt-5">
+                            <div class="alert alert-danger">
+                                <h4>Error Loading Application</h4>
+                                <p>There was a problem loading the application. Please try refreshing the page.</p>
+                                <p>If the problem persists, check the console for more details.</p>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+        </script>
+    </body>
+</html>
